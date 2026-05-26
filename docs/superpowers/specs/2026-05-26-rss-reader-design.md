@@ -49,7 +49,7 @@ Next.js App (localhost)
 | poll_batch_id | TEXT | 轮询批次 UUID |
 | bookmarked | INTEGER DEFAULT 0 | |
 | bookmarked_at | DATETIME | |
-| UNIQUE(feed_id, COALESCE(guid, link)) | | 防重复 |
+| UNIQUE indexes via partial indexes | | 防重复 (guid优先, 无guid时用link) |
 
 ### filter_rules
 | 字段 | 类型 | 说明 |
