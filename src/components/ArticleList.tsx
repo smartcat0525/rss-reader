@@ -31,9 +31,16 @@ export function ArticleList() {
   }
 
   if (state.articles.length === 0) {
+    const hasActiveFilter =
+      state.filters.some((f) => f.enabled) ||
+      state.keyword ||
+      state.dateFrom ||
+      state.dateTo ||
+      state.showBookmarksOnly;
+
     return (
       <div className="flex items-center justify-center h-32 text-gray-400 text-sm">
-        No articles found
+        {hasActiveFilter ? 'No articles match the current filter' : 'No articles found'}
       </div>
     );
   }

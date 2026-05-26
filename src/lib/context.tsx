@@ -64,6 +64,7 @@ type AppAction =
   | { type: 'SET_LOADING'; payload: boolean }
   | { type: 'SET_ERROR'; payload: string | null }
   | { type: 'TOGGLE_FILTER_EDITOR' }
+  | { type: 'OPEN_FILTER_EDITOR' }
   | { type: 'SET_EDITING_RULE'; payload: number | null }
   | { type: 'SELECT_RULE'; payload: number | null }
   | { type: 'SET_KEYWORD'; payload: string }
@@ -106,6 +107,8 @@ function appReducer(state: AppState, action: AppAction): AppState {
       return { ...state, error: action.payload };
     case 'TOGGLE_FILTER_EDITOR':
       return { ...state, showFilterEditor: !state.showFilterEditor };
+    case 'OPEN_FILTER_EDITOR':
+      return { ...state, showFilterEditor: true };
     case 'SET_EDITING_RULE':
       return { ...state, editingRuleId: action.payload };
     case 'SELECT_RULE': {

@@ -3,6 +3,7 @@ import { v4 as uuidv4 } from 'uuid';
 import db from './db';
 import { exec } from 'child_process';
 import { promisify } from 'util';
+import { extractArticleContent } from './content-extractor';
 
 const execAsync = promisify(exec);
 
@@ -12,6 +13,32 @@ const parser = new Parser({
 });
 
 const MAX_BATCHES = 5;
+const MIN_CONTENT_LENGTH = 200;
+const MIN_TEXT_LENGTH = 20;
+const MAX_CONCURRENT_EXTRACTIONS = 3;
+
+// Aggregator-only feeds — skip content extraction (link points to external sites)
+const SKIP_CONTENT_FEEDS = new Set(['news.ycombinator.com']);
+
+// Strip HTML tags to get plain text length
+function textLength(html: string): number {
+  return html.replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim().length;
+}
+
+function needsContentExtraction(content: string): boolean {
+  if (!content) return true;
+  if (content.length < MIN_CONTENT_LENGTH) return true;
+  return textLength(content) < MIN_TEXT_LENGTH;
+}
+
+function shouldExtractContent(feedUrl: string): boolean {
+  try {
+    const host = new URL(feedUrl).hostname;
+    return !SKIP_CONTENT_FEEDS.has(host);
+  } catch {
+    return false;
+  }
+}
 
 interface FeedRow {
   id: number;
@@ -96,6 +123,40 @@ export async function fetchFeed(feedId: number, url: string): Promise<{ count: n
       saveMany(entries);
     }
 
+    // Extract content from original article URLs when RSS content is minimal
+    if (shouldExtractContent(url) && entries.length > 0) {
+      const itemsNeedingContent = entries.filter((item) => {
+        const c =
+          (item as { content?: string }).content ||
+          (item as { contentSnippet?: string }).contentSnippet || '';
+        return needsContentExtraction(c) && (item as { link?: string }).link;
+      });
+
+      for (let i = 0; i < itemsNeedingContent.length; i += MAX_CONCURRENT_EXTRACTIONS) {
+        const batch = itemsNeedingContent.slice(i, i + MAX_CONCURRENT_EXTRACTIONS);
+        await Promise.all(
+          batch.map(async (item) => {
+            const link = (item as { link?: string }).link || '';
+            const extracted = await extractArticleContent(link);
+            if (!extracted) return;
+
+            const guid =
+              (item as { guid?: string; id?: string }).guid ||
+              (item as { guid?: string; id?: string }).id;
+            if (guid) {
+              db.prepare(
+                'UPDATE articles SET content = ?, snippet = COALESCE(NULLIF(?, \'\'), snippet), author = COALESCE(NULLIF(?, \'\'), author) WHERE feed_id = ? AND guid = ?',
+              ).run(extracted.content, extracted.snippet, extracted.author, feedId, guid);
+            } else {
+              db.prepare(
+                'UPDATE articles SET content = ?, snippet = COALESCE(NULLIF(?, \'\'), snippet), author = COALESCE(NULLIF(?, \'\'), author) WHERE feed_id = ? AND link = ?',
+              ).run(extracted.content, extracted.snippet, extracted.author, feedId, link);
+            }
+          }),
+        );
+      }
+    }
+
     // Cleanup old batches
     cleanupOldBatches(feedId);
 
@@ -145,4 +206,48 @@ export async function refreshFeed(feedId: number): Promise<{ count: number; erro
   const feed = db.prepare('SELECT id, url FROM feeds WHERE id = ?').get(feedId) as FeedRow | undefined;
   if (!feed) return { count: 0, error: 'Feed not found' };
   return fetchFeed(feed.id, feed.url);
+}
+
+// Fill in missing content for previously fetched articles
+export async function fillMissingArticleContent(): Promise<{ filled: number; skipped: number; errors: number }> {
+  // Fetch articles with short HTML content (we filter by text length in JS)
+  const articles = db
+    .prepare(
+      `SELECT a.id, a.link, a.feed_id, a.content
+       FROM articles a JOIN feeds f ON a.feed_id = f.id
+       WHERE a.link IS NOT NULL AND a.link != ''
+       ORDER BY a.fetched_at DESC LIMIT 500`,
+    )
+    .all() as Array<{ id: number; link: string; feed_id: number; content: string | null }>;
+
+  const eligible = articles.filter((a) => {
+    const feed = db.prepare('SELECT url FROM feeds WHERE id = ?').get(a.feed_id) as { url: string };
+    return shouldExtractContent(feed.url) && needsContentExtraction(a.content || '');
+  });
+
+  let filled = 0;
+  let skipped = 0;
+  let errors = 0;
+
+  for (let i = 0; i < eligible.length; i += MAX_CONCURRENT_EXTRACTIONS) {
+    const batch = eligible.slice(i, i + MAX_CONCURRENT_EXTRACTIONS);
+    const results = await Promise.allSettled(
+      batch.map(async (article) => {
+        const extracted = await extractArticleContent(article.link);
+        if (!extracted) {
+          skipped++;
+          return;
+        }
+        db.prepare(
+          'UPDATE articles SET content = ?, snippet = COALESCE(NULLIF(?, \'\'), snippet), author = COALESCE(NULLIF(?, \'\'), author) WHERE id = ?',
+        ).run(extracted.content, extracted.snippet, extracted.author, article.id);
+        filled++;
+      }),
+    );
+    for (const r of results) {
+      if (r.status === 'rejected') errors++;
+    }
+  }
+
+  return { filled, skipped, errors };
 }

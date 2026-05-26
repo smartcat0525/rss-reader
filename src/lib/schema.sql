@@ -29,7 +29,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_articles_unique_no_guid ON articles(feed_i
 CREATE TABLE IF NOT EXISTS filter_rules (
   id         INTEGER PRIMARY KEY AUTOINCREMENT,
   name       TEXT    NOT NULL,
-  enabled    INTEGER DEFAULT 1,
+  enabled    INTEGER DEFAULT 0,
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 

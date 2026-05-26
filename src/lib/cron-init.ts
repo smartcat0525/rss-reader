@@ -1,6 +1,5 @@
 import cron from 'node-cron';
-import { fetchAllFeeds } from './cron-worker';
-import db from './db';
+import { fetchAllFeeds, fillMissingArticleContent } from './cron-worker';
 
 let started = false;
 
@@ -32,5 +31,12 @@ export function startCronWorker() {
   // Initial fetch on startup
   fetchAllFeeds().then((results) => {
     console.log('[cron] Initial fetch completed');
+  });
+
+  // Fill missing article content every 2 hours
+  cron.schedule('0 */2 * * *', async () => {
+    console.log('[cron] Running content extraction for articles with missing content');
+    const result = await fillMissingArticleContent();
+    console.log(`[cron] Content extraction: filled=${result.filled}, skipped=${result.skipped}, errors=${result.errors}`);
   });
 }

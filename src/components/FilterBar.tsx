@@ -37,7 +37,7 @@ export function FilterBar() {
     if (activeRule?.id === ruleId) {
       // Already selected — open editor for this rule
       dispatch({ type: 'SET_EDITING_RULE', payload: ruleId });
-      dispatch({ type: 'TOGGLE_FILTER_EDITOR' });
+      dispatch({ type: 'OPEN_FILTER_EDITOR' });
     } else {
       // Select a new rule — enable it, disable others, then PUT each changed rule
       dispatch({ type: 'SELECT_RULE', payload: ruleId });
