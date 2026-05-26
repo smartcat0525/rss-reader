@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useApp } from '@/lib/context';
 
 const FIELDS = [
@@ -35,7 +35,28 @@ export function FilterRuleEditor() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // When editingRuleId is set, load that rule's data into the form
+  useEffect(() => {
+    if (state.editingRuleId !== null) {
+      const rule = state.filters.find((f) => f.id === state.editingRuleId);
+      if (rule) {
+        setNewRuleName(rule.name);
+        if (rule.conditions.length > 0) {
+          setConditions(rule.conditions.map((c) => ({ ...c })));
+        } else {
+          setConditions([{ field: 'title', operator: 'contains', value: '', logical_op: 'AND' }]);
+        }
+      }
+    } else {
+      // Reset form for new rule creation
+      setNewRuleName('');
+      setConditions([{ field: 'title', operator: 'contains', value: '', logical_op: 'AND' }]);
+    }
+    setError(null);
+  }, [state.editingRuleId, state.showFilterEditor]);
+
   const handleClose = () => {
+    dispatch({ type: 'SET_EDITING_RULE', payload: null });
     dispatch({ type: 'TOGGLE_FILTER_EDITOR' });
   };
 
@@ -64,24 +85,47 @@ export function FilterRuleEditor() {
     setError(null);
 
     try {
-      const res = await fetch('/api/filters', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: newRuleName.trim(), conditions }),
-      });
+      const isEditing = state.editingRuleId !== null;
 
-      if (res.ok) {
-        setNewRuleName('');
-        setConditions([{ field: 'title', operator: 'contains', value: '', logical_op: 'AND' }]);
-        // Re-fetch filters
-        const filtersRes = await fetch('/api/filters');
-        if (filtersRes.ok) {
-          const data = await filtersRes.json();
-          dispatch({ type: 'SET_FILTERS', payload: data });
+      if (isEditing) {
+        // Update existing rule
+        const res = await fetch(`/api/filters/${state.editingRuleId}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: newRuleName.trim(), conditions }),
+        });
+
+        if (res.ok) {
+          const filtersRes = await fetch('/api/filters');
+          if (filtersRes.ok) {
+            const data = await filtersRes.json();
+            dispatch({ type: 'SET_FILTERS', payload: data });
+          }
+          handleClose();
+        } else {
+          const err = await res.json();
+          setError(err.error || 'Failed to save rule');
         }
       } else {
-        const err = await res.json();
-        setError(err.error || 'Failed to save rule');
+        // Create new rule
+        const res = await fetch('/api/filters', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: newRuleName.trim(), conditions }),
+        });
+
+        if (res.ok) {
+          setNewRuleName('');
+          setConditions([{ field: 'title', operator: 'contains', value: '', logical_op: 'AND' }]);
+          const filtersRes = await fetch('/api/filters');
+          if (filtersRes.ok) {
+            const data = await filtersRes.json();
+            dispatch({ type: 'SET_FILTERS', payload: data });
+          }
+        } else {
+          const err = await res.json();
+          setError(err.error || 'Failed to save rule');
+        }
       }
     } catch {
       setError('Network error');
@@ -102,7 +146,7 @@ export function FilterRuleEditor() {
         body: JSON.stringify({ enabled: newEnabled }),
       });
       if (res.ok) {
-        dispatch({ type: 'TOGGLE_RULE_ENABLED', payload: ruleId });
+        dispatch({ type: 'SELECT_RULE', payload: newEnabled ? ruleId : null });
       }
     } catch {
       // silently fail
@@ -125,6 +169,9 @@ export function FilterRuleEditor() {
     }
   };
 
+  const isEditing = state.editingRuleId !== null;
+  const editingRule = isEditing ? state.filters.find((f) => f.id === state.editingRuleId) : null;
+
   return (
     <div className="fixed inset-0 bg-black/30 z-50 flex items-center justify-center" onClick={handleClose}>
       <div
@@ -133,56 +180,55 @@ export function FilterRuleEditor() {
       >
         {/* Header */}
         <div className="flex items-center justify-between p-4 border-b border-gray-200">
-          <h2 className="text-lg font-semibold">Filter Rules</h2>
+          <h2 className="text-lg font-semibold">
+            {isEditing ? `Edit Rule: ${editingRule?.name}` : 'Filter Rules'}
+          </h2>
           <button className="text-gray-400 hover:text-gray-600 text-xl" onClick={handleClose}>
             ×
           </button>
         </div>
 
-        {/* Existing rules */}
-        <div className="p-4 border-b border-gray-200">
-          <h3 className="text-sm font-medium text-gray-700 mb-2">Active Rules</h3>
-          {state.filters.length === 0 ? (
-            <p className="text-sm text-gray-400">No rules defined</p>
-          ) : (
-            <ul className="space-y-2">
-              {state.filters.map((rule) => (
-                <li key={rule.id} className="flex items-center justify-between text-sm">
-                  <div className="flex items-center gap-2">
+        {/* Only show existing rules list when NOT in edit mode */}
+        {!isEditing && (
+          <div className="p-4 border-b border-gray-200">
+            <h3 className="text-sm font-medium text-gray-700 mb-2">Active Rules</h3>
+            {state.filters.length === 0 ? (
+              <p className="text-sm text-gray-400">No rules defined</p>
+            ) : (
+              <ul className="space-y-2">
+                {state.filters.map((rule) => (
+                  <li key={rule.id} className="flex items-center justify-between text-sm">
+                    <div className="flex items-center gap-2">
+                      <button
+                        className={`w-5 h-5 rounded border flex items-center justify-center ${rule.enabled ? 'bg-green-500 border-green-500 text-white' : 'border-gray-300'}`}
+                        onClick={() => handleToggleRule(rule.id)}
+                        title={rule.enabled ? 'Disable' : 'Enable'}
+                      >
+                        {rule.enabled ? '✓' : ''}
+                      </button>
+                      <span>{rule.name}</span>
+                      <span className="text-gray-400 text-xs">
+                        ({rule.conditions.length} conditions)
+                      </span>
+                    </div>
                     <button
-                      className={`w-5 h-5 rounded border flex items-center justify-center ${rule.enabled ? 'bg-green-500 border-green-500 text-white' : 'border-gray-300'}`}
-                      onClick={() => handleToggleRule(rule.id)}
-                      title={rule.enabled ? 'Disable' : 'Enable'}
+                      className="text-red-400 hover:text-red-600 text-xs"
+                      onClick={() => handleDeleteRule(rule.id)}
                     >
-                      {rule.enabled ? '✓' : ''}
+                      Delete
                     </button>
-                    <span>{rule.name}</span>
-                    <span className="text-gray-400 text-xs">
-                      ({rule.conditions.length} conditions)
-                    </span>
-                  </div>
-                  <button
-                    className="text-red-400 hover:text-red-600 text-xs"
-                    onClick={() => handleDeleteRule(rule.id)}
-                  >
-                    Delete
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
 
-        {/* New rule form */}
+        {/* New/Edit rule form */}
         <div className="p-4 flex-1 overflow-y-auto">
-          <h3 className="text-sm font-medium text-gray-700 mb-2">Add New Rule</h3>
-          <input
-            type="text"
-            className="w-full text-sm border border-gray-300 rounded px-3 py-1.5 mb-3 focus:outline-none focus:ring-1 focus:ring-blue-500"
-            placeholder="Rule name"
-            value={newRuleName}
-            onChange={(e) => setNewRuleName(e.target.value)}
-          />
+          <h3 className="text-sm font-medium text-gray-700 mb-2">
+            {isEditing ? 'Edit Conditions' : 'Add New Rule'}
+          </h3>
 
           {/* Conditions */}
           <div className="space-y-2">
@@ -251,9 +297,9 @@ export function FilterRuleEditor() {
           <button
             className="w-full mt-4 text-sm bg-blue-600 text-white rounded px-3 py-2 hover:bg-blue-700 disabled:opacity-50"
             onClick={handleSaveRule}
-            disabled={saving || !newRuleName.trim()}
+            disabled={saving || !newRuleName.trim() || conditions.length === 0}
           >
-            {saving ? 'Saving...' : 'Save Rule'}
+            {saving ? 'Saving...' : isEditing ? 'Save Changes' : 'Save Rule'}
           </button>
         </div>
       </div>
