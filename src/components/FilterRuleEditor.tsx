@@ -230,6 +230,16 @@ export function FilterRuleEditor() {
             {isEditing ? 'Edit Conditions' : 'Add New Rule'}
           </h3>
 
+          {!isEditing && (
+            <input
+              type="text"
+              className="w-full text-sm border border-gray-300 rounded px-3 py-1.5 mb-3 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              placeholder="Rule name"
+              value={newRuleName}
+              onChange={(e) => setNewRuleName(e.target.value)}
+            />
+          )}
+
           {/* Conditions */}
           <div className="space-y-2">
             {conditions.map((cond, i) => (
