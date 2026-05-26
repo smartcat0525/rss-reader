@@ -1,8 +1,20 @@
 import { NextRequest, NextResponse } from 'next/server';
 import db from '@/lib/db';
 import { fetchFeed } from '@/lib/cron-worker';
+import { startCronWorker } from '@/lib/cron-init';
+
+// Lazy-start cron worker on first request (avoid Edge runtime issues)
+let cronStarted = false;
+function ensureCronWorker() {
+  if (cronStarted) return;
+  cronStarted = true;
+  if (process.env.NEXT_RUNTIME === 'nodejs') {
+    startCronWorker();
+  }
+}
 
 export async function GET() {
+  ensureCronWorker();
   const feeds = db.prepare(`
     SELECT f.*, COUNT(CASE WHEN a.bookmarked = 0 THEN 1 END) as article_count
     FROM feeds f
