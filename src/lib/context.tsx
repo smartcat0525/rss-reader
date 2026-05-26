@@ -48,6 +48,7 @@ interface AppState {
   loading: boolean;
   error: string | null;
   showFilterEditor: boolean;
+  editingRuleId: number | null;
   keyword: string;
   dateFrom: string;
   dateTo: string;
@@ -63,12 +64,13 @@ type AppAction =
   | { type: 'SET_LOADING'; payload: boolean }
   | { type: 'SET_ERROR'; payload: string | null }
   | { type: 'TOGGLE_FILTER_EDITOR' }
+  | { type: 'SET_EDITING_RULE'; payload: number | null }
+  | { type: 'SELECT_RULE'; payload: number | null }
   | { type: 'SET_KEYWORD'; payload: string }
   | { type: 'SET_DATE_FROM'; payload: string }
   | { type: 'SET_DATE_TO'; payload: string }
   | { type: 'TOGGLE_BOOKMARKS_ONLY' }
-  | { type: 'UPDATE_ARTICLE_BOOKMARK'; payload: { id: number; bookmarked: number } }
-  | { type: 'TOGGLE_RULE_ENABLED'; payload: number };
+  | { type: 'UPDATE_ARTICLE_BOOKMARK'; payload: { id: number; bookmarked: number } };
 
 const initialState: AppState = {
   feeds: [],
@@ -79,6 +81,7 @@ const initialState: AppState = {
   loading: false,
   error: null,
   showFilterEditor: false,
+  editingRuleId: null,
   keyword: '',
   dateFrom: '',
   dateTo: '',
@@ -103,6 +106,18 @@ function appReducer(state: AppState, action: AppAction): AppState {
       return { ...state, error: action.payload };
     case 'TOGGLE_FILTER_EDITOR':
       return { ...state, showFilterEditor: !state.showFilterEditor };
+    case 'SET_EDITING_RULE':
+      return { ...state, editingRuleId: action.payload };
+    case 'SELECT_RULE': {
+      if (action.payload === null) {
+        return { ...state, filters: state.filters.map((f) => ({ ...f, enabled: 0 })) };
+      }
+      const filters = state.filters.map((f) => ({
+        ...f,
+        enabled: f.id === action.payload ? 1 : 0,
+      }));
+      return { ...state, filters };
+    }
     case 'SET_KEYWORD':
       return { ...state, keyword: action.payload };
     case 'SET_DATE_FROM':
@@ -120,12 +135,6 @@ function appReducer(state: AppState, action: AppAction): AppState {
           ? { ...state.selectedArticle, bookmarked: action.payload.bookmarked }
           : state.selectedArticle;
       return { ...state, articles, selectedArticle };
-    }
-    case 'TOGGLE_RULE_ENABLED': {
-      const filters = state.filters.map((f) =>
-        f.id === action.payload ? { ...f, enabled: f.enabled ? 0 : 1 } : f,
-      );
-      return { ...state, filters };
     }
     default:
       return state;
@@ -166,7 +175,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  // Fetch articles when selectedFeed, keyword, dateFrom, dateTo, or showBookmarksOnly changes
+  // Fetch articles when selectedFeed, keyword, dateFrom, dateTo, showBookmarksOnly, or enabled filter changes
   const fetchArticles = useCallback(async () => {
     dispatch({ type: 'SET_LOADING', payload: true });
     try {
@@ -187,7 +196,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     } finally {
       dispatch({ type: 'SET_LOADING', payload: false });
     }
-  }, [state.selectedFeed, state.keyword, state.dateFrom, state.dateTo, state.showBookmarksOnly]);
+  }, [state.selectedFeed, state.keyword, state.dateFrom, state.dateTo, state.showBookmarksOnly, state.filters]);
 
   useEffect(() => {
     fetchFeeds();
