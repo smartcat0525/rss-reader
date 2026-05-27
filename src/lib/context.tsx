@@ -147,6 +147,7 @@ function appReducer(state: AppState, action: AppAction): AppState {
 const AppContext = createContext<{
   state: AppState;
   dispatch: React.Dispatch<AppAction>;
+  refetchArticles: () => Promise<void>;
 } | null>(null);
 
 export function AppProvider({ children }: { children: ReactNode }) {
@@ -219,7 +220,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
     return () => clearInterval(interval);
   }, [fetchFeeds, fetchArticles]);
 
-  return <AppContext.Provider value={{ state, dispatch }}>{children}</AppContext.Provider>;
+  const refetchArticles = useCallback(async () => {
+    await fetchArticles();
+  }, [fetchArticles]);
+
+  return <AppContext.Provider value={{ state, dispatch, refetchArticles }}>{children}</AppContext.Provider>;
 }
 
 export function useApp() {

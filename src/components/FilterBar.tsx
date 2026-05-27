@@ -3,7 +3,7 @@
 import { useApp } from '@/lib/context';
 
 export function FilterBar() {
-  const { state, dispatch } = useApp();
+  const { state, dispatch, refetchArticles } = useApp();
 
   const handleSearch = (value: string) => {
     dispatch({ type: 'SET_KEYWORD', payload: value });
@@ -28,20 +28,17 @@ export function FilterBar() {
 
   const handleSelectRule = async (ruleId: number | null) => {
     if (ruleId === null) {
-      // "None" selected — disable all
       dispatch({ type: 'SELECT_RULE', payload: null });
+      refetchArticles();
       return;
     }
 
     const activeRule = state.filters.find((f) => f.enabled);
     if (activeRule?.id === ruleId) {
-      // Already selected — open editor for this rule
       dispatch({ type: 'SET_EDITING_RULE', payload: ruleId });
       dispatch({ type: 'OPEN_FILTER_EDITOR' });
     } else {
-      // Select a new rule — enable it, disable others, then PUT each changed rule
       dispatch({ type: 'SELECT_RULE', payload: ruleId });
-      // Persist enabled state to server
       try {
         await Promise.all(
           state.filters.map((f) =>
@@ -52,8 +49,11 @@ export function FilterBar() {
             }),
           ),
         );
+        // DB is now consistent — refetch articles
+        refetchArticles();
       } catch {
         // silently fail — UI state already updated
+        refetchArticles();
       }
     }
   };
