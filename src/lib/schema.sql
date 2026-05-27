@@ -8,19 +8,20 @@ CREATE TABLE IF NOT EXISTS feeds (
 );
 
 CREATE TABLE IF NOT EXISTS articles (
-  id            INTEGER PRIMARY KEY AUTOINCREMENT,
-  feed_id       INTEGER NOT NULL REFERENCES feeds(id) ON DELETE CASCADE,
-  guid          TEXT,
-  title         TEXT,
-  link          TEXT,
-  content       TEXT,
-  snippet       TEXT,
-  author        TEXT,
-  published_at  DATETIME,
-  fetched_at    DATETIME DEFAULT CURRENT_TIMESTAMP,
-  poll_batch_id TEXT,
-  bookmarked    INTEGER DEFAULT 0,
-  bookmarked_at DATETIME
+  id               INTEGER PRIMARY KEY AUTOINCREMENT,
+  feed_id          INTEGER NOT NULL REFERENCES feeds(id) ON DELETE CASCADE,
+  guid             TEXT,
+  title            TEXT,
+  link             TEXT,
+  content          TEXT,
+  snippet          TEXT,
+  author           TEXT,
+  published_at     DATETIME,
+  fetched_at       DATETIME DEFAULT CURRENT_TIMESTAMP,
+  poll_batch_id    TEXT,
+  bookmarked       INTEGER DEFAULT 0,
+  bookmarked_at    DATETIME,
+  matched_rule_ids TEXT    DEFAULT ''
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_articles_unique ON articles(feed_id, guid) WHERE guid IS NOT NULL;

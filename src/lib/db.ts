@@ -21,4 +21,11 @@ db.pragma('foreign_keys = ON');
 const schema = readFileSync(path.join(process.cwd(), 'src', 'lib', 'schema.sql'), 'utf-8');
 db.exec(schema);
 
+// Migration: add matched_rule_ids column to articles if missing
+try {
+  db.exec("ALTER TABLE articles ADD COLUMN matched_rule_ids TEXT DEFAULT ''");
+} catch {
+  // Column already exists
+}
+
 export default db;
