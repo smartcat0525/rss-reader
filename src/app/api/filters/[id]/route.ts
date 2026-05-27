@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import db from '@/lib/db';
-import { validateRuleConditions } from '@/lib/filter-engine';
+import { validateRuleConditions, recomputeMatchesForRule } from '@/lib/filter-engine';
 
 export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -47,6 +47,10 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
 
   try {
     tx();
+    // Recompute matches if rule definition changed
+    if (conditions || feed_ids) {
+      recomputeMatchesForRule(Number(id));
+    }
     return NextResponse.json({ success: true });
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
