@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
 import db from '@/lib/db';
-import { applyFilters } from '@/lib/filter-engine';
 
 export async function GET(req: NextRequest) {
   const searchParams = req.nextUrl.searchParams;
@@ -12,6 +11,11 @@ export async function GET(req: NextRequest) {
   const page = parseInt(searchParams.get('page') || '1', 10);
   const limit = parseInt(searchParams.get('limit') || '50', 10);
   const offset = (page - 1) * limit;
+
+  // Find the active (enabled=1) filter rule
+  const activeRule = db.prepare('SELECT id FROM filter_rules WHERE enabled = 1 LIMIT 1').get() as
+    | { id: number }
+    | undefined;
 
   let query = `
     SELECT a.*, f.title as feed_title, f.url as feed_url
@@ -41,13 +45,16 @@ export async function GET(req: NextRequest) {
     query += ' AND a.bookmarked = 1';
   }
 
+  // Filter by pre-computed matched_rule_ids
+  if (activeRule) {
+    query += ` AND (',' || a.matched_rule_ids || ',' LIKE ?)`;
+    params.push(`%,${activeRule.id},%`);
+  }
+
   query += ' ORDER BY a.published_at DESC, a.fetched_at DESC';
   query += ` LIMIT ${limit} OFFSET ${offset}`;
 
   const articles = db.prepare(query).all(...params) as Record<string, unknown>[];
-
-  // Apply filter rules
-  const filtered = applyFilters(articles, feedId ? Number(feedId) : undefined);
 
   // Count total (before filter rules)
   let countQuery = 'SELECT COUNT(*) as total FROM articles a WHERE 1=1';
@@ -71,7 +78,11 @@ export async function GET(req: NextRequest) {
   if (bookmarked === '1') {
     countQuery += ' AND a.bookmarked = 1';
   }
+  if (activeRule) {
+    countQuery += ` AND (',' || a.matched_rule_ids || ',' LIKE ?)`;
+    countParams.push(`%,${activeRule.id},%`);
+  }
   const { total } = db.prepare(countQuery).get(...countParams) as { total: number };
 
-  return NextResponse.json({ articles: filtered, total, page, limit, has_more: offset + limit < total });
+  return NextResponse.json({ articles, total, page, limit, has_more: offset + limit < total });
 }
