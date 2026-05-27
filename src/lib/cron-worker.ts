@@ -4,6 +4,7 @@ import db from './db';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import { extractArticleContent } from './content-extractor';
+import { recomputeMatchesForFeed, computeMatchesForArticle, saveMatchesForArticle } from './filter-engine';
 
 const execAsync = promisify(exec);
 
@@ -157,6 +158,9 @@ export async function fetchFeed(feedId: number, url: string): Promise<{ count: n
       }
     }
 
+    // Recompute filter matches for this feed's articles
+    recomputeMatchesForFeed(feedId);
+
     // Cleanup old batches
     cleanupOldBatches(feedId);
 
@@ -241,6 +245,11 @@ export async function fillMissingArticleContent(): Promise<{ filled: number; ski
         db.prepare(
           'UPDATE articles SET content = ?, snippet = COALESCE(NULLIF(?, \'\'), snippet), author = COALESCE(NULLIF(?, \'\'), author) WHERE id = ?',
         ).run(extracted.content, extracted.snippet, extracted.author, article.id);
+        // Recompute filter matches since content changed
+        const updated = db.prepare('SELECT id, title, content, snippet, author, published_at, fetched_at FROM articles WHERE id = ?').get(article.id) as Record<string, unknown>;
+        const feedTitle = db.prepare('SELECT title FROM feeds WHERE id = ?').get(article.feed_id) as { title: string };
+        const matched = computeMatchesForArticle(updated, article.feed_id, feedTitle.title);
+        saveMatchesForArticle(article.id, matched);
         filled++;
       }),
     );
