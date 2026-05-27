@@ -19,7 +19,7 @@ interface FilterRule {
   feed_ids: number[];
 }
 
-function matchCondition(article: Article, condition: FilterCondition, feedTitle: string): boolean {
+export function matchCondition(article: Article, condition: FilterCondition, feedTitle: string): boolean {
   const { field, operator, value } = condition;
   let target: string;
 
@@ -68,7 +68,7 @@ function matchCondition(article: Article, condition: FilterCondition, feedTitle:
   }
 }
 
-function matchRule(article: Article, rule: FilterRule, feedTitle: string): boolean {
+export function matchRule(article: Article, rule: FilterRule, feedTitle: string): boolean {
   if (rule.conditions.length === 0) return true;
 
   let result = matchCondition(article, rule.conditions[0], feedTitle);
@@ -104,13 +104,11 @@ export function getActiveRules(feedId?: number): FilterRule[] {
 
       const feedIds = feedRules.map((fr) => fr.feed_id);
 
-      // If no feed bindings, rule is global. If feed specified and rule has bindings, check match.
       if (feedId && feedIds.length > 0 && !feedIds.includes(feedId)) return null;
       if (feedId && feedIds.length === 0) {
         // Global rule applies
       }
       if (!feedId && feedIds.length > 0) {
-        // No specific feed requested, skip feed-bound rules
         return null;
       }
 
@@ -119,7 +117,106 @@ export function getActiveRules(feedId?: number): FilterRule[] {
     .filter(Boolean) as FilterRule[];
 }
 
-// Apply filter rules to article list
+// Get ALL rules (enabled or not) that apply to a feed — used for pre-computation
+export function getApplicableRules(feedId?: number): FilterRule[] {
+  const rules = db.prepare('SELECT * FROM filter_rules').all() as Array<{
+    id: number;
+    name: string;
+    enabled: number;
+  }>;
+
+  return rules
+    .map((rule) => {
+      const conditions = db
+        .prepare('SELECT field, operator, value, logical_op FROM filter_conditions WHERE rule_id = ?')
+        .all(rule.id) as FilterCondition[];
+
+      const feedRules = db
+        .prepare('SELECT feed_id FROM filter_feed_rules WHERE rule_id = ?')
+        .all(rule.id) as Array<{ feed_id: number }>;
+
+      const feedIds = feedRules.map((fr) => fr.feed_id);
+
+      if (feedId && feedIds.length > 0 && !feedIds.includes(feedId)) return null;
+      if (!feedId && feedIds.length > 0) return null;
+
+      return { ...rule, conditions, feed_ids: feedIds };
+    })
+    .filter(Boolean) as FilterRule[];
+}
+
+// Compute which rules match a given article
+export function computeMatchesForArticle(article: Article, feedId: number, feedTitle: string): number[] {
+  const rules = getApplicableRules(feedId);
+  return rules.filter((rule) => matchRule(article, rule, feedTitle)).map((r) => r.id);
+}
+
+// Save matched rule IDs to an article
+export function saveMatchesForArticle(articleId: number, ruleIds: number[]): void {
+  db.prepare("UPDATE articles SET matched_rule_ids = ? WHERE id = ?").run(
+    ruleIds.length > 0 ? ruleIds.join(',') : '',
+    articleId,
+  );
+}
+
+// Recompute matches for all articles in a feed
+export function recomputeMatchesForFeed(feedId: number): void {
+  const feed = db.prepare('SELECT id, title FROM feeds WHERE id = ?').get(feedId) as
+    | { id: number; title: string }
+    | undefined;
+  if (!feed) return;
+
+  const feedTitle = feed.title;
+  const articles = db
+    .prepare('SELECT id, title, content, snippet, author, published_at, fetched_at FROM articles WHERE feed_id = ?')
+    .all(feedId) as Article[];
+
+  const tx = db.transaction(() => {
+    for (const article of articles) {
+      const matched = computeMatchesForArticle(article, feedId, feedTitle);
+      saveMatchesForArticle(article.id as number, matched);
+    }
+  });
+  tx();
+}
+
+// Recompute matches for all articles affected by a specific rule
+export function recomputeMatchesForRule(ruleId: number): void {
+  const rule = db.prepare('SELECT * FROM filter_rules WHERE id = ?').get(ruleId) as
+    | { id: number; name: string; enabled: number }
+    | undefined;
+  if (!rule) return;
+
+  const feedBindings = db
+    .prepare('SELECT feed_id FROM filter_feed_rules WHERE rule_id = ?')
+    .all(ruleId) as Array<{ feed_id: number }>;
+  const feedIds = feedBindings.map((fb) => fb.feed_id);
+
+  const feeds =
+    feedIds.length > 0
+      ? (db
+          .prepare('SELECT id, title FROM feeds WHERE id IN (' + feedIds.map(() => '?').join(',') + ')')
+          .all(...feedIds) as Array<{ id: number; title: string }>)
+      : (db.prepare('SELECT id, title FROM feeds').all() as Array<{ id: number; title: string }>);
+
+  const tx = db.transaction(() => {
+    for (const feed of feeds) {
+      const articles = db
+        .prepare(
+          'SELECT id, title, content, snippet, author, published_at, fetched_at FROM articles WHERE feed_id = ?',
+        )
+        .all(feed.id) as Article[];
+      for (const article of articles) {
+        const allRules = getApplicableRules(feed.id);
+        const matched = allRules.filter((r) => matchRule(article, r, feed.title)).map((r) => r.id);
+        saveMatchesForArticle(article.id as number, matched);
+      }
+    }
+  });
+  tx();
+}
+
+// Apply filter rules to article list (deprecated — use pre-computed matched_rule_ids instead)
 export function applyFilters(articles: Article[], feedId?: number): Article[] {
   const rules = getActiveRules(feedId);
   if (rules.length === 0) return articles;
